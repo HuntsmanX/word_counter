@@ -3,13 +3,20 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 const FileName = "hello.txt"
+
+type wordFreeq struct {
+	Word  string
+	Count int
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -18,12 +25,16 @@ func main() {
 	logger.Info("Get File", "File", *fileName)
 	wordMap := map[string]int{}
 	re := regexp.MustCompile(`[\p{L}\d]+`)
-	lines, err := getWordsFromFile(*fileName, re, logger)
+	err := getWordsFromFile(*fileName, re, logger, wordMap)
 	if err != nil {
 		os.Exit(-1)
 	}
-	fillMap(wordMap, lines)
-	logger.Info("Result", "Data", wordMap)
+	wordres := mapToStr(wordMap)
+	sort.SliceStable(wordres, func(i, j int) bool {
+		return wordres[i].Count > wordres[j].Count
+	})
+	logger.Info("Result", "Data", wordres)
+	output(wordres)
 }
 
 func fillMap(gm map[string]int, str []string) {
@@ -38,19 +49,31 @@ func fillMap(gm map[string]int, str []string) {
 	}
 }
 
-func getWordsFromFile(filename string, re *regexp.Regexp, logger *slog.Logger) ([]string, error) {
-	lines := []string{}
+func getWordsFromFile(filename string, re *regexp.Regexp, logger *slog.Logger, wm map[string]int) error {
 	file, err := os.Open(filename)
 	if err != nil {
 		logger.Error("Parse File", "Error", err)
-		return nil, err
+		return err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		str := scanner.Text()
-		lines = append(lines, re.FindAllString(str, -1)...)
-
+		fillMap(wm, re.FindAllString(scanner.Text(), -1))
 	}
-	return lines, nil
+
+	return nil
+}
+
+func mapToStr(m map[string]int) []wordFreeq {
+	words := make([]wordFreeq, 0)
+	for k, v := range m {
+		words = append(words, wordFreeq{k, v})
+	}
+	return words
+}
+
+func output(wordsFre []wordFreeq) {
+	for _, kv := range wordsFre {
+		fmt.Printf("%s %d\n", kv.Word, kv.Count)
+	}
 }
