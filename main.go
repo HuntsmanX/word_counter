@@ -11,68 +11,86 @@ import (
 	"strings"
 )
 
-const FileName = "hello.txt"
+const (
+	defaultFileName = "hello.txt"
+	bufferSize      = 4096
+)
 
-type wordFreeq struct {
+type wordFreq struct {
 	Word  string
 	Count int
 }
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	fileName := flag.String("file", FileName, "The name for a file.")
+	fileName := flag.String("file", defaultFileName, "The name for a file.")
 	flag.Parse()
-	logger.Info("Get File", "File", *fileName)
+	logger.Info("reading file", slog.String("file", *fileName))
 	wordMap := map[string]int{}
-	re := regexp.MustCompile(`[\p{L}\d]+`)
-	err := getWordsFromFile(*fileName, re, logger, wordMap)
+	expression := regexp.MustCompile(`[\p{L}\d]+`)
+	err := getWordsFromFile(*fileName, expression, logger, wordMap)
 	if err != nil {
+		logger.Error("unable to get words from file", slog.String("err", err.Error()))
 		os.Exit(-1)
 	}
-	wordres := mapToStr(wordMap)
-	sort.SliceStable(wordres, func(i, j int) bool {
-		return wordres[i].Count > wordres[j].Count
+	wordResult := mapToSlice(wordMap)
+	sort.SliceStable(wordResult, func(i, j int) bool {
+		return wordResult[i].Count > wordResult[j].Count
 	})
-	logger.Info("Result", "Data", wordres)
-	output(wordres)
+	logger.Info("result", "data", wordResult)
+	output(wordResult)
 }
 
-func fillMap(gm map[string]int, str []string) {
-	for _, w := range str {
-		w = strings.ToLower(w)
-		_, ok := gm[w]
-		if ok {
-			gm[w]++
-		} else {
-			gm[w] = 1
-		}
+func fillMap(wordMap map[string]int, str []string) {
+	for _, word := range str {
+		wordMap[strings.ToLower(word)]++
 	}
 }
 
-func getWordsFromFile(filename string, re *regexp.Regexp, logger *slog.Logger, wm map[string]int) error {
+func getWordsFromFile(filename string, regexp *regexp.Regexp, logger *slog.Logger, wordMap map[string]int) error {
 	file, err := os.Open(filename)
 	if err != nil {
-		logger.Error("Parse File", "Error", err)
-		return err
+		logger.Error(
+			"unable to read file",
+			slog.String("filename", filename),
+			slog.String("err", err.Error()),
+		)
+		return fmt.Errorf("unable to read file: %w", err)
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fillMap(wm, re.FindAllString(scanner.Text(), -1))
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Error("error while closing file", slog.String("err", err.Error()))
+		}
+	}()
+	reader := bufio.NewReaderSize(file, bufferSize)
+	buffer := make([]byte, bufferSize)
+	for {
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			text := string(buffer[:n])
+			words := regexp.FindAllString(text, -1)
+			fillMap(wordMap, words)
+		}
+		if err != nil {
+			if err.Error() != "EOF" {
+				logger.Error("error while reading file", slog.String("err", err.Error()))
+			}
+			break
+		}
 	}
 
 	return nil
 }
 
-func mapToStr(m map[string]int) []wordFreeq {
-	words := make([]wordFreeq, 0)
+func mapToSlice(m map[string]int) []wordFreq {
+	words := make([]wordFreq, 0, len(m))
 	for k, v := range m {
-		words = append(words, wordFreeq{k, v})
+		words = append(words, wordFreq{k, v})
 	}
 	return words
 }
 
-func output(wordsFre []wordFreeq) {
+func output(wordsFre []wordFreq) {
 	for _, kv := range wordsFre {
 		fmt.Printf("%s %d\n", kv.Word, kv.Count)
 	}
